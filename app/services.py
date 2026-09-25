@@ -1146,22 +1146,20 @@ def _receipt_out(
     receipt: sqlite3.Row,
     repeated: bool,
 ) -> schemas.RescanReceiptOut:
-    """组装回执响应：remaining 为认领帧段与当前缺帧区间的交集（结案后仍可缩短）。"""
+    """组装回执响应：remaining 为认领帧段与当前缺帧区间的交集（结案后仍可缩短）。
+
+    added_frames / duplicates 恒取回执落库时冻结的快照（rescan_receipts 表），
+    不回查 batches 表：回执批次被撤销后其 batch_id 可能被普通批次复用，
+    按编号回查会把新批次的明细错装到旧回执上。快照列自回执表引入起即为
+    NOT NULL，历史回执均带快照，直接读取不影响既有持久化数据。
+    """
     st = _state_from_db(conn, claim["roll_no"])
     remaining = intersect_intervals(
         st["missing"], [(claim["frame_start"], claim["frame_end"])]
     )
     raw_frames = json.loads(receipt["raw_frames_json"])
-    batch = conn.execute(
-        "SELECT frames_merged_json, duplicates_json FROM batches WHERE id = ?",
-        (receipt["batch_id"],),
-    ).fetchone()
-    if batch is not None:
-        added_frames = json.loads(batch["frames_merged_json"])
-        duplicates = json.loads(batch["duplicates_json"])
-    else:  # 回执批次后来被撤销：以回执落库时的快照为准
-        added_frames = json.loads(receipt["added_frames_json"])
-        duplicates = json.loads(receipt["duplicates_json"])
+    added_frames = json.loads(receipt["added_frames_json"])
+    duplicates = json.loads(receipt["duplicates_json"])
     return schemas.RescanReceiptOut(
         id=receipt["id"],
         claim_id=claim["id"],
