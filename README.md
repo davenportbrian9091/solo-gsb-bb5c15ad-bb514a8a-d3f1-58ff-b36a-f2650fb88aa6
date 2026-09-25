@@ -429,7 +429,10 @@ curl -X POST http://localhost:8000/rescan-claims/92825c49b6f14f4d8058cdd50d13a82
 - 补扫批次与普通批次共用 `GET /batches/{batch_id}`、
   `DELETE /batches/{batch_id}`：撤销补扫批次后对应帧重新成为缺帧；
   已存回执仍可凭原始参数幂等查询（返回落库时的明细快照），已结案的认领
-  不会因此复活，让出的帧段可被正常认领。
+  不会因此复活，让出的帧段可被正常认领。被撤销批次的 `batch_id` 之后可被
+  新批次（普通批次或补扫批次）复用：历史回执的 `added_frames` / `duplicates`
+  始终以**回执落库时冻结的快照**为准，不随复用该编号的新批次变化；
+  `remaining_missing_ranges` 则继续按当前胶卷缺帧实时计算。
 - `frames` 为空、`batch_id` 为空白 → `422`。
 
 ### 11. 交付快照与差异对比
@@ -1031,6 +1034,10 @@ curl http://localhost:8000/health
      （`200`，`"repeated": true`），不重复导入；幂等判定优先于到期复核，
      认领到期后仍可凭原始参数重放同一份回执；内容变更或对已结案认领
      再提交新回执均为 `409`；回执与认领一一持久化在 `rescan_receipts` 表。
+   - 回执的 `added_frames` / `duplicates` 为**落库时冻结的快照**：补扫批次
+     被撤销后其 `batch_id` 可被新批次复用，历史回执明细仍按快照返回，
+     不读取复用该编号的新批次；`remaining_missing_ranges` 始终按当前
+     胶卷缺帧实时计算。
 9. **交付快照与差异**（`POST /rolls/{roll_no}/snapshots`、
    `GET /rolls/{roll_no}/snapshots/{snapshot_id}/diff`）：
    - 创建时在一致性读中固化当时的**预期覆盖闭区间、实扫帧（去重集合）、

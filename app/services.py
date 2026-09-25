@@ -1146,22 +1146,21 @@ def _receipt_out(
     receipt: sqlite3.Row,
     repeated: bool,
 ) -> schemas.RescanReceiptOut:
-    """组装回执响应：remaining 为认领帧段与当前缺帧区间的交集（结案后仍可缩短）。"""
+    """组装回执响应：remaining 为认领帧段与当前缺帧区间的交集（结案后仍可缩短）。
+
+    added_frames / duplicates 一律取回执落库时冻结在 rescan_receipts 表中的
+    快照，不回查 batches 表：回执批次被撤销后其 batch_id 可被新批次复用，
+    且撤销其他批次时存活批次的明细也会被重建，按批次号关联都会把后来
+    批次的明细读进历史回执。快照列自回执持久化起即为 NOT NULL，既有
+    回执数据无需迁移。
+    """
     st = _state_from_db(conn, claim["roll_no"])
     remaining = intersect_intervals(
         st["missing"], [(claim["frame_start"], claim["frame_end"])]
     )
     raw_frames = json.loads(receipt["raw_frames_json"])
-    batch = conn.execute(
-        "SELECT frames_merged_json, duplicates_json FROM batches WHERE id = ?",
-        (receipt["batch_id"],),
-    ).fetchone()
-    if batch is not None:
-        added_frames = json.loads(batch["frames_merged_json"])
-        duplicates = json.loads(batch["duplicates_json"])
-    else:  # 回执批次后来被撤销：以回执落库时的快照为准
-        added_frames = json.loads(receipt["added_frames_json"])
-        duplicates = json.loads(receipt["duplicates_json"])
+    added_frames = json.loads(receipt["added_frames_json"])
+    duplicates = json.loads(receipt["duplicates_json"])
     return schemas.RescanReceiptOut(
         id=receipt["id"],
         claim_id=claim["id"],
@@ -1196,7 +1195,10 @@ def submit_rescan_receipt(
     - 每帧必须落在认领闭区间 [frame_start, frame_end] 内，且提交时仍属于
       该胶卷缺帧 → ReceiptConflictError（409）；
     - 相同认领、batch_id、原始帧列表的重试：即使认领已到期也原样返回已存
-      回执（200），不重复导入、不改变结案状态（幂等重试优先于到期判定）；
+      回执（200），不重复导入、不改变结案状态（幂等重试优先于到期判定）。
+      回执的 added_frames / duplicates 始终取落库时冻结在 rescan_receipts
+      表中的快照：补扫批次被撤销后其 batch_id 可被新批次复用，历史回执
+      明细不随之变化；remaining_missing_ranges 按当前胶卷缺帧实时计算；
     - 内容变更（batch_id 或原始帧列表不同）、对已结案认领再提交新回执、
       batch_id 已被其他回执/批次占用 → ReceiptConflictError（409）。
 

@@ -542,8 +542,10 @@ def submit_rescan_receipt(
     以认领闭区间作为该补扫批次的预期范围，批次导入、回执持久化与认领结案
     在同一 SQLite 写事务内完成。只接受未到期、未释放、未结案的认领；帧号须在
     认领闭区间内且提交时仍属该胶卷缺帧，否则 409 且数据不变。相同认领、批次号
-    与原始帧列表的重试返回已存回执（200），不重复导入；变更内容或对已结案认领
-    再提交返回 409。
+    与原始帧列表的重试返回已存回执（200），不重复导入；回执的 added_frames /
+    duplicates 取落库时冻结的快照——补扫批次被撤销后其 batch_id 可被新批次复用，
+    历史回执明细不随之变化，remaining_missing_ranges 按当前缺帧实时计算；
+    变更内容或对已结案认领再提交返回 409。
     """
     try:
         result, code = services.submit_rescan_receipt(conn, claim_id, payload)
